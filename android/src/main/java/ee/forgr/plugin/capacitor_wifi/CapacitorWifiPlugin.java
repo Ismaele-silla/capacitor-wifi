@@ -426,15 +426,13 @@ public class CapacitorWifiPlugin extends Plugin {
     @PluginMethod
     public void getIpAddress(PluginCall call) {
         try {
-            String ipAddress = null;
-
-            Network network = connectivityManager.getActiveNetwork();
-            if (network != null) {
-                NetworkCapabilities capabilities = connectivityManager.getNetworkCapabilities(network);
-                if (capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                    ipAddress = getWifiIpAddress();
-                }
+            WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+            if (wifiInfo == null) {
+                call.reject("Failed to get WiFi info");
+                return;
             }
+
+            String ipAddress = resolveWifiIpAddress(wifiInfo);
 
             if (ipAddress != null && !ipAddress.isEmpty()) {
                 JSObject ret = new JSObject();
@@ -550,7 +548,7 @@ public class CapacitorWifiPlugin extends Plugin {
             }
 
             // Get IP Address
-            String ipAddress = getWifiIpAddress();
+            String ipAddress = resolveWifiIpAddress(wifiInfo);
             if (ipAddress != null && !ipAddress.isEmpty()) {
                 ret.put("ip", ipAddress);
             } else {
@@ -577,6 +575,21 @@ public class CapacitorWifiPlugin extends Plugin {
         } catch (Exception e) {
             call.reject("Failed to get WiFi info: " + e.getMessage(), e);
         }
+    }
+
+    private String resolveWifiIpAddress(@NonNull WifiInfo wifiInfo) {
+        String ipAddress = formatIpv4Address(wifiInfo.getIpAddress());
+        if (ipAddress != null) {
+            return ipAddress;
+        }
+        return getWifiIpAddress();
+    }
+
+    private String formatIpv4Address(int ipAddress) {
+        if (ipAddress == 0) {
+            return null;
+        }
+        return (ipAddress & 0xff) + "." + ((ipAddress >> 8) & 0xff) + "." + ((ipAddress >> 16) & 0xff) + "." + ((ipAddress >> 24) & 0xff);
     }
 
     /**
