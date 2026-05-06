@@ -1,5 +1,7 @@
 package ee.forgr.plugin.capacitor_wifi;
 
+import static android.app.Activity.RESULT_OK;
+
 import android.Manifest;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -18,7 +20,9 @@ import android.net.wifi.WifiNetworkSpecifier;
 import android.net.wifi.WifiNetworkSuggestion;
 import android.os.Build;
 import android.provider.Settings;
+import androidx.activity.result.ActivityResult;
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -26,6 +30,7 @@ import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
@@ -119,10 +124,47 @@ public class CapacitorWifiPlugin extends Plugin {
             suggestionsList.add(suggestionBuilder.build());
 
             intent.putParcelableArrayListExtra(Settings.EXTRA_WIFI_NETWORK_LIST, suggestionsList);
-            getActivity().startActivity(intent);
-            call.resolve();
+            startActivityForResult(call, intent, "handleAddNetworkModernResult");
         } catch (Exception e) {
             call.reject("Failed to add network: " + e.getMessage(), e);
+        }
+    }
+
+    @ActivityCallback
+    private void handleAddNetworkModernResult(@Nullable PluginCall call, ActivityResult result) {
+        if (call == null) {
+            return;
+        }
+
+        if (result.getResultCode() != RESULT_OK) {
+            call.reject("Adding network was canceled");
+            return;
+        }
+
+        Intent data = result.getData();
+        if (data == null || !data.hasExtra(Settings.EXTRA_WIFI_NETWORK_RESULT_LIST)) {
+            call.reject("Failed to add network");
+            return;
+        }
+
+        ArrayList<Integer> codes = data.getIntegerArrayListExtra(Settings.EXTRA_WIFI_NETWORK_RESULT_LIST);
+        Integer firstCode = codes != null && !codes.isEmpty() ? codes.get(0) : null;
+
+        if (firstCode == null) {
+            call.reject("Failed to add network");
+            return;
+        }
+
+        switch (firstCode) {
+            case Settings.ADD_WIFI_RESULT_SUCCESS:
+            case Settings.ADD_WIFI_RESULT_ALREADY_EXISTS:
+                call.resolve();
+                return;
+            case Settings.ADD_WIFI_RESULT_ADD_OR_UPDATE_FAILED:
+                call.reject("Failed to add network");
+                return;
+            default:
+                call.reject("Failed to add network");
         }
     }
 
@@ -426,15 +468,13 @@ public class CapacitorWifiPlugin extends Plugin {
     @PluginMethod
     public void getIpAddress(PluginCall call) {
         try {
-            String ipAddress = null;
-
-            Network network = connectivityManager.getActiveNetwork();
-            if (network != null) {
-                NetworkCapabilities capabilities = connectivityManager.getNetworkCapabilities(network);
-                if (capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                    ipAddress = getWifiIpAddress();
-                }
+            WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+            if (wifiInfo == null) {
+                call.reject("Failed to get WiFi info");
+                return;
             }
+
+            String ipAddress = resolveWifiIpAddress(wifiInfo);
 
             if (ipAddress != null && !ipAddress.isEmpty()) {
                 JSObject ret = new JSObject();
@@ -550,7 +590,7 @@ public class CapacitorWifiPlugin extends Plugin {
             }
 
             // Get IP Address
-            String ipAddress = getWifiIpAddress();
+            String ipAddress = resolveWifiIpAddress(wifiInfo);
             if (ipAddress != null && !ipAddress.isEmpty()) {
                 ret.put("ip", ipAddress);
             } else {
@@ -577,6 +617,21 @@ public class CapacitorWifiPlugin extends Plugin {
         } catch (Exception e) {
             call.reject("Failed to get WiFi info: " + e.getMessage(), e);
         }
+    }
+
+    private String resolveWifiIpAddress(@NonNull WifiInfo wifiInfo) {
+        String ipAddress = formatIpv4Address(wifiInfo.getIpAddress());
+        if (ipAddress != null) {
+            return ipAddress;
+        }
+        return getWifiIpAddress();
+    }
+
+    private String formatIpv4Address(int ipAddress) {
+        if (ipAddress == 0) {
+            return null;
+        }
+        return (ipAddress & 0xff) + "." + ((ipAddress >> 8) & 0xff) + "." + ((ipAddress >> 16) & 0xff) + "." + ((ipAddress >> 24) & 0xff);
     }
 
     /**
