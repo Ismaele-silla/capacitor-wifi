@@ -198,20 +198,18 @@ public class CapacitorWifiPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManager
     }
 
     @objc override public func requestPermissions(_ call: CAPPluginCall) {
-        // On iOS, location permission is automatically requested when accessing WiFi info
-        // For iOS 13+, location permission is required to access SSID
-        let status = getLocationPermissionStatus()
-        if status != "prompt" {
-            call.resolve(["location": status])
-            return
-        }
-
-        permissionCalls.append(call)
-        if permissionCalls.count > 1 {
-            return
-        }
-
         DispatchQueue.main.async {
+            let status = self.getLocationPermissionStatus()
+            if status != "prompt" {
+                call.resolve(["location": status])
+                return
+            }
+
+            self.permissionCalls.append(call)
+            if self.permissionCalls.count > 1 {
+                return
+            }
+
             self.locationManager?.requestWhenInUseAuthorization()
         }
     }
@@ -302,6 +300,13 @@ public class CapacitorWifiPlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManager
     }
 
     private func resolvePermissionCallIfNeeded() {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async {
+                self.resolvePermissionCallIfNeeded()
+            }
+            return
+        }
+
         if permissionCalls.isEmpty {
             return
         }
